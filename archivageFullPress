@@ -1,0 +1,60 @@
+import os
+import shutil
+from datetime import datetime
+
+def main():
+    # Listing des chemins des dossiers # A améliorer en trouvant une solution pour contrôler en atomatique l'ensemble des dossiers "00_A_ARCHIVER_ONLINE" de chaque volume client.
+    volume1_path = "/Users/k.bachekour/Documents/ARCHIVAGE/00_A_ARCHIVER_ONLINE"
+    volume2_base_path = "/Users/k.bachekour/Documents/ARCHIVAGE/Sortie_Flux/Client"
+    volume3_path = "/Users/k.bachekour/Documents/ARCHIVAGE/ARCHIVES-2ANS/Client"
+    log_dir = "/Users/k.bachekour/Documents/ARCHIVAGE/logs"
+    
+    #Vérifie si le chemin spécifié existe
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+        
+    #transforme datetime en chaîne avec des millisecondes à l'aide de la fonction strftime : années, mois, jours, heures, minutes, secondes
+    log_file = os.path.join(log_dir, f"log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+    moved_folders = []
+    
+    # Test si un dossier porte strictement le même nom dans le volume Sortie_Flux, si il existe alors il copie le dossier et le renomme "SORTIE_FLUX"
+    for folder in os.listdir(volume1_path):
+        volume1_folder_path = os.path.join(volume1_path, folder)
+        if os.path.isdir(volume1_folder_path):
+            volume2_client_path = os.path.join(volume2_base_path, folder)
+            if os.path.exists(volume2_client_path):
+                dest_path = os.path.join(volume1_folder_path, "SORTIE_FLUX")
+                try:
+                    shutil.copytree(volume2_client_path, dest_path)
+                    if os.path.exists(dest_path) and os.listdir(dest_path):
+                        shutil.rmtree(volume2_client_path)
+
+                        # Déplacer le dossier vers ARCHIVES-2ANS
+                        archive_dest_path = os.path.join(volume3_path, folder)
+                        shutil.move(volume1_folder_path, archive_dest_path)
+                        moved_folders.append(folder)
+                    else:
+                        print(f"La copie de {volume2_client_path} vers {dest_path} a échoué")
+                except Exception as e:
+                    print(f"Échec de la copie : {e}")
+            else:
+                # Si le dossier n'existe pas dans sortie_flux , copiez-le directement dans le dossier "00_A_ARCHIVER_ONLINE"
+                archive_dest_path = os.path.join(volume3_path, folder)
+                try:
+                    shutil.move(volume1_folder_path, archive_dest_path)
+                    moved_folders.append(folder)
+                except Exception as e:
+                    print(f"Échec de la copie directe vers ARCHIVES-2ANS : {e}")
+
+    # Enregistrer la liste des dossiers déplacés dans le fichier log
+    if moved_folders:
+        with open(log_file, "w") as log:
+            log.write("Les dossiers suivants ont été déplacés vers ARCHIVES-2ANS :\n")
+            for folder in moved_folders:
+                log.write(f" - {folder}\n")
+        print(f"Le fichier journal a été créé : {log_file}")
+    else:
+        print("Aucun dossier n'a été déplacé vers ARCHIVES-2ANS.")
+
+if __name__ == "__main__":
+    main()
