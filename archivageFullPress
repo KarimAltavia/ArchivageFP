@@ -3,11 +3,12 @@ import shutil
 from datetime import datetime
 
 def main():
-    # Listing des chemins des dossiers # A améliorer en trouvant une solution pour contrôler en atomatique l'ensemble des dossiers "00_A_ARCHIVER_ONLINE" de chaque volume client.
-    volume1_path = "/Users/k.bachekour/Documents/ARCHIVAGE/00_A_ARCHIVER_ONLINE"
-    volume2_base_path = "/Users/k.bachekour/Documents/ARCHIVAGE/Sortie_Flux/Client"
-    volume3_path = "/Users/k.bachekour/Documents/ARCHIVAGE/ARCHIVES-2ANS/Client"
-    log_dir = "/Users/k.bachekour/Documents/ARCHIVAGE/logs"
+    base_path = "/Users/k.bachekour/Documents/ARCHIVAGE"
+    
+    volume1_path = os.path.join(base_path, "00_A_ARCHIVER_ONLINE")
+    volume2_base_path = os.path.join(base_path, "Sortie_Flux/Client")
+    volume3_path = os.path.join(base_path, "ARCHIVES-2ANS/Client")
+    log_dir = os.path.join(base_path, "logs")
     
     #Vérifie si le chemin spécifié existe
     if not os.path.exists(log_dir):
