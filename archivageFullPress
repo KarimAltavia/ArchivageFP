@@ -1,61 +1,110 @@
 import os
 import shutil
-from datetime import datetime
+import logging
+import datetime
+
+def get_client_name():
+    return input("Quel client voulez-vous sauvegarder ? ")
+
+def verify_and_copy_folders(path, save_path, folder_to_save):
+    for folder in folder_to_save:
+        src = os.path.join(save_path, folder)
+        dst = os.path.join(path, folder, "PDFs")
+        if os.path.exists(src):
+            if not os.path.exists(dst):
+                shutil.copytree(src, dst)
+                print(f"Le dossier {folder} a été copié de {save_path} à {path}.")
+            else:
+                print(f"Le dossier {folder} existe déjà dans {path}.")
+        else:
+            print(f"Le dossier {folder} n'existe pas dans {save_path}.")
+
+def create_logs_directory(logs_dir):
+    os.makedirs(logs_dir, exist_ok=True)
+
+def setup_logger(logs_dir):
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+
+    now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_file_path = os.path.join(logs_dir, f"journal_événement{now}.log")
+
+    handler = logging.FileHandler(log_file_path)
+    handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    
+    return logger
+
+def copy_folders_and_log(source_dir, dest_dir, logger):
+    copied_folders = []
+
+    for folder_name in os.listdir(source_dir):
+        source_folder = os.path.join(source_dir, folder_name)
+        dest_folder = os.path.join(dest_dir, folder_name)
+
+        if not os.path.isdir(source_folder):
+            continue
+
+        if os.path.exists(dest_folder):
+            logger.info(f"Le dossier '{folder_name}' existe déjà dans le dossier d'archivage - de 2 ans.")
+        else:
+            try:
+                shutil.copytree(source_folder, dest_folder)
+                logger.info(f"Le dossier '{folder_name}' a été copié avec succès dans le dossier d'archivage - de 2 ans.")
+                copied_folders.append(folder_name)
+            except Exception as e:
+                logger.error(f"La copie du dossier '{folder_name}' a échoué : {str(e)}")
+    return copied_folders
+
+def write_copied_folders_to_file(copied_folders, logs_dir):
+    now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    with open(os.path.join(logs_dir, f"liste_des_dossiers_copiés_{now}.txt"), 'w') as f:
+        for folder_name in copied_folders:
+            f.write(f"{folder_name}\n")
+
+def remove_source_folders(copied_folders, source_dir, logger):
+    for folder_name in copied_folders:
+        source_folder = os.path.join(source_dir, folder_name)
+        if os.path.isdir(source_folder):
+            try:
+                shutil.rmtree(source_folder)
+                logger.info(f"Le dossier source '{folder_name}' a été supprimé avec succès.")
+            except Exception as e:
+                logger.error(f"La suppression du dossier source '{folder_name}' a échoué : {str(e)}")
+        else:
+            logger.warning(f"Le dossier source '{folder_name}' n'existe plus.")
 
 def main():
-    base_path = "/Users/k.bachekour/Documents/ARCHIVAGE"
-    
-    volume1_path = os.path.join(base_path, "00_A_ARCHIVER_ONLINE")
-    volume2_base_path = os.path.join(base_path, "Sortie_Flux/Client")
-    volume3_path = os.path.join(base_path, "ARCHIVES-2ANS/Client")
-    log_dir = os.path.join(base_path, "logs")
-    
-    #Vérifie si le chemin spécifié existe
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-        
-    #transforme datetime en chaîne avec des millisecondes à l'aide de la fonction strftime : années, mois, jours, heures, minutes, secondes
-    log_file = os.path.join(log_dir, f"log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
-    moved_folders = []
-    
-    # Test si un dossier porte strictement le même nom dans le volume Sortie_Flux, si il existe alors il copie le dossier et le renomme "SORTIE_FLUX"
-    for folder in os.listdir(volume1_path):
-        volume1_folder_path = os.path.join(volume1_path, folder)
-        if os.path.isdir(volume1_folder_path):
-            volume2_client_path = os.path.join(volume2_base_path, folder)
-            if os.path.exists(volume2_client_path):
-                dest_path = os.path.join(volume1_folder_path, "SORTIE_FLUX")
-                try:
-                    shutil.copytree(volume2_client_path, dest_path)
-                    if os.path.exists(dest_path) and os.listdir(dest_path):
-                        shutil.rmtree(volume2_client_path)
+    client = get_client_name()
 
-                        # Déplacer le dossier vers ARCHIVES-2ANS
-                        archive_dest_path = os.path.join(volume3_path, folder)
-                        shutil.move(volume1_folder_path, archive_dest_path)
-                        moved_folders.append(folder)
-                    else:
-                        print(f"La copie de {volume2_client_path} vers {dest_path} a échoué")
-                except Exception as e:
-                    print(f"Échec de la copie : {e}")
-            else:
-                # Si le dossier n'existe pas dans sortie_flux , copiez-le directement dans le dossier "00_A_ARCHIVER_ONLINE"
-                archive_dest_path = os.path.join(volume3_path, folder)
-                try:
-                    shutil.move(volume1_folder_path, archive_dest_path)
-                    moved_folders.append(folder)
-                except Exception as e:
-                    print(f"Échec de la copie directe vers ARCHIVES-2ANS : {e}")
+    path_base = "/Users/k.bachekour/Documents/FP/mnt/prod/shares/"
 
-    # Enregistrer la liste des dossiers déplacés dans le fichier log
-    if moved_folders:
-        with open(log_file, "w") as log:
-            log.write("Les dossiers suivants ont été déplacés vers ARCHIVES-2ANS :\n")
-            for folder in moved_folders:
-                log.write(f" - {folder}\n")
-        print(f"Le fichier journal a été créé : {log_file}")
+    path = os.path.join(path_base, client, "FRANCE/00_A_ARCHIVER_ONLINE/")
+    if client == "AUCHAN":
+        save_path = os.path.join(path_base, "ALTFRSE/ALTFRSE_SORTIE_FLUX", client, "PUBLISH")
     else:
-        print("Aucun dossier n'a été déplacé vers ARCHIVES-2ANS.")
+        save_path = os.path.join(path_base, "ALTFRSE/ALTFRSE_SORTIE_FLUX", client)
+    source_dir = os.path.join(path_base, client, "FRANCE/00_A_ARCHIVER_ONLINE")
+    dest_dir = os.path.join(path_base, "ARCHIVES-2ANS", client)
+    logs_dir = os.path.join(dest_dir, "logs")
+
+    if os.path.exists(path):
+        folder_to_save = [f for f in os.listdir(path) if os.path.isdir(os.path.join(path, f))]
+        verify_and_copy_folders(path, save_path, folder_to_save)
+    else:
+        print(f"Le chemin {path} n'existe pas.")
+
+    create_logs_directory(logs_dir)
+    logger = setup_logger(logs_dir)
+
+    copied_folders = copy_folders_and_log(source_dir, dest_dir, logger)
+    write_copied_folders_to_file(copied_folders, logs_dir)
+    remove_source_folders(copied_folders, source_dir, logger)
+
+    num_copied_folders = len(copied_folders)
+    print(f"Tu as copié avec succès {num_copied_folders} dossiers dans {os.path.join(path_base, 'ARCHIVES-2ANS', client)}!")
 
 if __name__ == "__main__":
     main()
