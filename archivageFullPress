@@ -1,27 +1,96 @@
+
+
+
+# Demande le nom du client en utilisant la fonction get_client_name(). Le nom doit être en majuscules et ne contenir que des lettres.
+# 
+# Définit les chemins de base pour les opérations de sauvegarde et d'archivage en fonction du nom du client.
+# 
+# Utilise la fonction verify_and_copy_folders() pour vérifier si les dossiers à sauvegarder existent, les copie et supprime les dossiers sources copiés du volume ALTFRSE_SORTIE_FLUX.
+# 
+# Crée un répertoire de logs en utilisant la fonction create_logs_directory().
+# 
+# Configure le logger en utilisant la fonction setup_logger() pour enregistrer les événements de copie et de suppression de dossiers.
+# 
+# Copie les dossiers du répertoire source vers le répertoire d'archivage en utilisant la fonction copy_folders_and_log() et enregistre les événements dans les logs.
+# 
+# Écrit la liste des dossiers copiés dans un fichier en utilisant la fonction write_copied_folders_to_file().
+# 
+# Supprime les dossiers sources copiés en utilisant la fonction remove_source_folders() et enregistre les événements dans les logs.
+# 
+# Affiche le nombre de dossiers copiés avec succès.
+
+
 import os
 import shutil
+import filecmp
 import logging
 import datetime
+import stat
+import sys
+if sys.version_info[0] < 3:
+    raise Exception("Le script nécessite Python 3.")
+    
+
+# Fonction pour obtenir le nom du client
 
 def get_client_name():
-    return input("Quel client voulez-vous sauvegarder ? ")
+    base_path = "/mnt/prod/shares/"
+    excluded_folders = {"ARCHIVES-2ANS", "ALTFRSE"}
 
-def verify_and_copy_folders(path, save_path, folder_to_save):
+    client_folders = [
+        folder for folder in os.listdir(base_path)
+        if os.path.isdir(os.path.join(base_path, folder)) and folder not in excluded_folders
+    ]
+
+    while True:
+        client = input("Quel client voulez-vous sauvegarder ? ").strip()
+        if client.lower() == "exit" or client.lower() == "quit":
+            return None
+        if client in client_folders:
+            return client
+        print(f"Le nom du client doit être l'un des dossiers suivants: {', '.join(client_folders)}. Veuillez réessayer.")
+
+
+
+# Fonction pour vérifier et copier les dossiers, puis supprimer les dossiers source du volume ALTFRSE_SORTIE_FLUX
+def verify_and_copy_folders(path, save_path, folder_to_save, client):
+    copied_source_folders = []
+
     for folder in folder_to_save:
-        src = os.path.join(save_path, folder)
-        dst = os.path.join(path, folder, "PDFs")
-        if os.path.exists(src):
+        src_publish = os.path.join(save_path, folder)
+        src_main = os.path.join(os.path.split(save_path)[0], folder)
+        dst = os.path.join(path, folder, "Sortie_Flux")
+
+        src_publish_exists = os.path.exists(src_publish)
+        src_main_exists = os.path.exists(src_main)
+
+        if src_publish_exists or src_main_exists:
             if not os.path.exists(dst):
-                shutil.copytree(src, dst)
-                print(f"Le dossier {folder} a été copié de {save_path} à {path}.")
+                if src_publish_exists:
+                    shutil.copytree(src_publish, dst)
+                    copied_source_folders.append(src_publish)
+                elif src_main_exists:
+                    shutil.copytree(src_main, dst)
+                    copied_source_folders.append(src_main)
+                print(f"Le dossier {folder} a été copié à {path}.")
             else:
                 print(f"Le dossier {folder} existe déjà dans {path}.")
         else:
             print(f"Le dossier {folder} n'existe pas dans {save_path}.")
 
+    # Supprime les dossiers source copiés du volume ALTFRSE_SORTIE_FLUX
+    for src_folder in copied_source_folders:
+        try:
+            shutil.rmtree(src_folder)
+            print(f"Le dossier source {src_folder} a été supprimé avec succès.")
+        except Exception as e:
+            print(f"La suppression du dossier source {src_folder} a échoué : {str(e)}")
+
+# Fonction pour créer un répertoire de logs
 def create_logs_directory(logs_dir):
     os.makedirs(logs_dir, exist_ok=True)
 
+# Fonction pour configurer le logger
 def setup_logger(logs_dir):
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
@@ -34,8 +103,27 @@ def setup_logger(logs_dir):
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    
+
     return logger
+
+# Fonction pour copier les dossiers et logger les événements
+
+"""  la fonction compare_folders est ajoutée pour vérifier si les dossiers source et destination sont identiques 
+après la copie. La vérification est effectuée après l'appel à shutil.copytree(), 
+et un message d'erreur est enregistré dans le logger si la copie est incomplète ou corrompue. """
+
+def compare_folders(src, dst):
+    comparison = filecmp.dircmp(src, dst)
+    if comparison.diff_files or comparison.left_only or comparison.right_only or comparison.funny_files:
+        return False
+    for common_subdir in comparison.common_dirs:
+        src_subdir = os.path.join(src, common_subdir)
+        dst_subdir = os.path.join(dst, common_subdir)
+        if not compare_folders(src_subdir, dst_subdir):
+            return False
+    return True
+
+import stat
 
 def copy_folders_and_log(source_dir, dest_dir, logger):
     copied_folders = []
@@ -49,21 +137,60 @@ def copy_folders_and_log(source_dir, dest_dir, logger):
 
         if os.path.exists(dest_folder):
             logger.info(f"Le dossier '{folder_name}' existe déjà dans le dossier d'archivage - de 2 ans.")
+            print(f"Attention ! Le dossier '{folder_name}' existe déjà dans le dossier d'archivage - de 2 ans.")
         else:
             try:
                 shutil.copytree(source_folder, dest_folder)
+                os.chmod(dest_folder, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)  # chmod 755
                 logger.info(f"Le dossier '{folder_name}' a été copié avec succès dans le dossier d'archivage - de 2 ans.")
                 copied_folders.append(folder_name)
             except Exception as e:
                 logger.error(f"La copie du dossier '{folder_name}' a échoué : {str(e)}")
+
     return copied_folders
 
+
+# Fonction pour écrire la liste des dossiers copiés dans un fichier
 def write_copied_folders_to_file(copied_folders, logs_dir):
     now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     with open(os.path.join(logs_dir, f"liste_des_dossiers_copiés_{now}.txt"), 'w') as f:
         for folder_name in copied_folders:
             f.write(f"{folder_name}\n")
 
+# Fonction pour copier les dossiers et logger les événements
+def copy_folders_and_log(source_dir, dest_dir, logger):
+    copied_folders = []
+    for folder in os.listdir(source_dir):
+        src_folder_path = os.path.join(source_dir, folder)
+        dest_folder_path = os.path.join(dest_dir, folder)
+
+        if os.path.isdir(src_folder_path):
+            try:
+                shutil.copytree(src_folder_path, dest_folder_path)
+                os.chmod(dest_folder_path, 0o755)  # change les permissions
+                for root, dirs, files in os.walk(dest_folder_path):
+                    for d in dirs:
+                        os.chmod(os.path.join(root, d), 0o755) # change les permissions
+                    for f in files:
+                        os.chmod(os.path.join(root, f), 0o644) # change les permissions des sous dossiers et fichiers
+                copied_folders.append(folder)
+                logger.info(f"Le dossier {folder} a été copié avec succès.")
+            except Exception as e:
+                logger.error(f"Erreur lors de la copie du dossier {folder}: {e}")
+    return copied_folders
+
+
+
+# Fonction pour écrire la liste des dossiers copiés dans un fichier
+def write_copied_folders(copied_folders, logs_dir):
+    # Écrit la liste des dossiers copiés dans un fichier
+    now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    with open(os.path.join(logs_dir, f"liste_des_dossiers_copiés_{now}.txt"), 'w') as f:
+        for folder_name in copied_folders:
+            f.write(f"{folder_name}\n")
+
+
+# Fonction pour supprimer les dossiers sources copiés et logger les événements
 def remove_source_folders(copied_folders, source_dir, logger):
     for folder_name in copied_folders:
         source_folder = os.path.join(source_dir, folder_name)
@@ -76,10 +203,12 @@ def remove_source_folders(copied_folders, source_dir, logger):
         else:
             logger.warning(f"Le dossier source '{folder_name}' n'existe plus.")
 
+
+# Fonction principale qui exécute toutes les étapes du script
 def main():
     client = get_client_name()
 
-    path_base = "/Users/k.bachekour/Documents/FP/mnt/prod/shares/"
+    path_base = "/mnt/prod/shares/"
 
     path = os.path.join(path_base, client, "FRANCE/00_A_ARCHIVER_ONLINE/")
     if client == "AUCHAN":
@@ -87,24 +216,30 @@ def main():
     else:
         save_path = os.path.join(path_base, "ALTFRSE/ALTFRSE_SORTIE_FLUX", client)
     source_dir = os.path.join(path_base, client, "FRANCE/00_A_ARCHIVER_ONLINE")
-    dest_dir = os.path.join(path_base, "ARCHIVES-2ANS", client)
+    dest_dir = os.path.join(path_base, "ARCHIVES-2ANS/FRANCE/", client)
     logs_dir = os.path.join(dest_dir, "logs")
-
+    
     if os.path.exists(path):
         folder_to_save = [f for f in os.listdir(path) if os.path.isdir(os.path.join(path, f))]
-        verify_and_copy_folders(path, save_path, folder_to_save)
+        verify_and_copy_folders(path, save_path, folder_to_save, client)
     else:
-        print(f"Le chemin {path} n'existe pas.")
+        print(f"ALERTE: Le dossier 00_A_ARCHIVER_ONLINE n'existe pas. Chemin: {path}")
+        return
 
     create_logs_directory(logs_dir)
     logger = setup_logger(logs_dir)
 
     copied_folders = copy_folders_and_log(source_dir, dest_dir, logger)
-    write_copied_folders_to_file(copied_folders, logs_dir)
-    remove_source_folders(copied_folders, source_dir, logger)
+    if copied_folders:
+        write_copied_folders_to_file(copied_folders, logs_dir)
+        remove_source_folders(copied_folders, source_dir, logger)
 
-    num_copied_folders = len(copied_folders)
-    print(f"Tu as copié avec succès {num_copied_folders} dossiers dans {os.path.join(path_base, 'ARCHIVES-2ANS', client)}!")
+        num_copied_folders = len(copied_folders)
+        print(f"Tu as copié avec succès {num_copied_folders} dossiers dans {os.path.join(path_base, 'ARCHIVES-2ANS', client)}!")
+    else:
+        print(f"Aucun dossier n'a été copié dans {os.path.join(path_base, 'ARCHIVES-2ANS', client)}.")
 
+
+# Exécute la fonction principale si le script est exécuté directement
 if __name__ == "__main__":
     main()
